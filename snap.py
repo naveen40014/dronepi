@@ -1,106 +1,90 @@
+#!/usr/bin/env python3
 """
-sudo modprobe bcm2835-v4l2  these codes are for enabling video capture in raspbery
-cap = cv2.VideoCapture(0)
+Snapshot capture script using Picamera2 on Raspberry Pi.
 
-Saves a series of snapshots with the current camera as snapshot_<width>_<height>_<nnn>.jpg
+Usage:
+  python3 snap_picamera2.py [--folder FOLDER] [--name NAME] [--width WIDTH] [--height HEIGHT]
 
 Arguments:
-    --f <output folder>     default: current folder
-    --n <file name>         default: snapshot
-    --w <width px>          default: none
-    --h <height px>         default: none
+  --folder    Folder to save snapshots (default: current directory)
+  --name      Base filename (default: 'snapshot')
+  --width     Desired frame width in pixels (default: native)
+  --height    Desired frame height in pixels (default: native)
 
-Buttons:
-    q           - quit
-    space bar   - save the snapshot
-    
-  
+Controls:
+  SPACE       Save current frame as JPEG
+  q           Quit the application
 """
-
-import cv2
-import time
+import os
 import sys
 import argparse
-import os
+import cv2
 
-__author__ = "Tiziano Fiorenzani"
-__date__ = "01/06/2018"
-
-
-def save_snaps(width=0, height=0, name="snapshot", folder=".", raspi=False):
-
-    if raspi:
-        os.system('sudo modprobe bcm2835-v4l2')
-    os.makedirs(folder, exist_ok=True)
-    cap = cv2.VideoCapture(0)
-    if width > 0 and height > 0:
-        print("Setting the custom Width and Height")
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
-    try:
-        if not os.path.exists(folder):
-            os.makedirs(folder)
-            # ----------- CREATE THE FOLDER -----------------
-            folder = os.path.dirname(folder)
-            try:
-                os.stat(folder)
-            except:
-                os.mkdir(folder)
-    except:
-        pass
-
-    nSnap   = 0
-    w       = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
-    h       = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
-
-    fileName    = "%s/%s_%d_%d_" %(folder, name, w, h)
-    while True:
-        ret, frame = cap.read()
-
-        cv2.imshow('camera', frame)
-
-        key = cv2.waitKey(1) & 0xFF
-        if key == ord('q'):
-            break
-        if key == ord(' '):
-            print("Saving image ", nSnap)
-            cv2.imwrite("%s%d.jpg"%(fileName, nSnap), frame)
-            nSnap += 1
-
-    cap.release()
-    cv2.destroyAllWindows()
+try:
+    from picamera2 import Picamera2
+except ImportError:
+    sys.exit("ERROR: Picamera2 module not found. Install with: sudo apt install python3-picamera2")
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Save snapshots with Picamera2")
+    parser.add_argument("--folder", default=".",
+                        help="Output folder for snapshots")
+    parser.add_argument("--name", default="snapshot",
+                        help="Base filename for saved images")
+    parser.add_argument("--width", type=int, default=0,
+                        help="Frame width in pixels (0 = native)")
+    parser.add_argument("--height", type=int, default=0,
+                        help="Frame height in pixels (0 = native)")
+    return parser.parse_args()
 
 
 def main():
-    # ---- DEFAULT VALUES ---
-    SAVE_FOLDER = "."
-    FILE_NAME = "snapshot"
-    FRAME_WIDTH = 0
-    FRAME_HEIGHT = 0
+    args = parse_args()
+    os.makedirs(args.folder, exist_ok=True)
 
-    # ----------- PARSE THE INPUTS -----------------
-    parser = argparse.ArgumentParser(
-        description="Saves snapshot from the camera. \n q to quit \n spacebar to save the snapshot")
-    parser.add_argument("--folder", default=SAVE_FOLDER, help="Path to the save folder (default: current)")
-    parser.add_argument("--name", default=FILE_NAME, help="Picture file name (default: snapshot)")
-    parser.add_argument("--dwidth", default=FRAME_WIDTH, type=int, help="<width> px (default the camera output)")
-    parser.add_argument("--dheight", default=FRAME_HEIGHT, type=int, help="<height> px (default the camera output)")
-    parser.add_argument("--raspi", default=False, type=bool, help="<bool> True if using a raspberry Pi")
-    args = parser.parse_args()
+    picam2 = Picamera2()
+    # configure preview with optional resolution override
+    if args.width > 0 and args.height > 0:
+        config = picam2.create_preview_configuration(
+            main={"format": "RGB888", "size": (args.width, args.height)}
+        )
+    else:
+        config = picam2.create_preview_configuration(main={"format": "RGB888"})
 
-    SAVE_FOLDER = args.folder
-    FILE_NAME = args.name
-    FRAME_WIDTH = args.dwidth
-    FRAME_HEIGHT = args.dheight
+    picam2.configure(config)
+    picam2.start()
 
+    # retrieve actual resolution
+    res_w, res_h = config.main["size"]
+    count = 0
+    window_name = "camera"
+    cv2.namedWindow(window_name)
 
-    save_snaps(width=args.dwidth, height=args.dheight, name=args.name, folder=args.folder, raspi=args.raspi)
+    try:
+        while True:
+            frame = picam2.capture_array()
+            # convert RGB (Picamera2) to BGR for OpenCV
+            frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+            cv2.imshow(window_name, frame_bgr)
+            key = cv2.waitKey(1) & 0xFF
 
-    print("Files saved")
+            if key == ord(' '):  # SPACE: save snapshot
+                filename = os.path.join(
+                    args.folder,
+                    f"{args.name}_{res_w}_{res_h}_{count}.jpg"
+                )
+                cv2.imwrite(filename, frame_bgr)
+                print(f"[+] Saved {filename}")
+                count += 1
+
+            elif key == ord('q'):  # q: quit
+                break
+
+    finally:
+        picam2.stop()
+        cv2.destroyAllWindows()
+
 
 if __name__ == "__main__":
     main()
-
-
