@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
 """
+python3 snap_picamera2.py \
+  --folder rasp \
+  --name motion720p \
+  --width 1280 \
+  --height 720
+
 Snapshot capture script using Picamera2 on Raspberry Pi.
 
 Usage:
